@@ -1,0 +1,154 @@
+﻿@page "/"
+@using UploadFilesLibrary1;
+@using UploadFilesApp.Data;
+@inject IConfiguration config
+@inject ISqlDataAccess sql
+<PageTitle>Upload Demo App</PageTitle>
+
+<h1>Upload Demo</h1>
+<EditForm Model="newCustomer" OnValidSubmit="SubmitForm">
+    <div>
+        <label for="firstName"> First Name</label>
+        <InputText id="firstName" class="form-control" @bind-Value="newCustomer.FirstName" />
+    </div>
+    <div>
+        <label for="lastName"> Last Name</label>
+        <InputText id="lastName" class="form-control" @bind-Value="newCustomer.LastName" />
+    </div>
+    <div>
+        <label for="profilePicture">Profile Picture:</label>
+        <InputFile OnChange="@LoadFiles" class="form-control" accept=".png,.jpg,.jpeg"/>
+    </div>
+    <button class="btn btn-primary mt-3" type="submit">Create Customer</button>
+
+</EditForm>
+<br />
+
+@if(errors.Count> 0)
+{
+    <ul>
+        @foreach (var error in errors)
+        {
+            <li>@error</li>
+        }
+    </ul>
+}
+
+@if(customers is not null){
+    <h2> Existing Customers</h2>
+    <table class="table table-bordered">
+        <thead> 
+            <tr>
+                <th>Id</th>
+                <th>First Name</th>
+                <th>Last Name</th>
+                <th>Profile Picture</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var c in customers)
+            {
+                <tr>
+                    <td>@c.Id</td>
+                    <td>@c.FirstName</td>
+                    <td>@c.LastName</td>
+                    <td>
+                        @if(!string.IsNullOrWhiteSpace(c.FileName))
+                        {
+                            <img src="@c.FileName" width="500" />
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private long maxFileSize = 3 * 1024 * 1024;
+    private List<string> errors = new();
+    private CustomerModel newCustomer = new();
+    private IBrowserFile? file;
+    private List<CustomerModel>? customers;
+
+    private async Task LoasCustomers()
+    {
+        customers = await sql.LoadData<CustomerModel>(
+            "dbo.spCustomer_GetAll",
+            "Default",
+            null);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoasCustomers();
+    }
+
+
+
+    private async Task SubmitForm()
+    {
+        errors.Clear();
+
+        try
+        {
+            string relativePath = await CaptureFile();
+            newCustomer.FileName = relativePath;
+
+            await sql.SaveData("dbo.spCustomer_Insert", "Default" ,newCustomer);
+
+            newCustomer = new();
+            file = null;
+            errors.Clear();
+
+            await LoasCustomers();
+
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"Error: {ex.Message}");
+        }
+    }
+
+    private async Task LoadFiles(InputFileChangeEventArgs e)
+    {
+        file = e.File;
+
+    }
+
+    private async Task<string> CaptureFile()
+    {
+        if(file is null)
+        {
+            return "";
+        }
+
+        try
+        {
+            string newFileName = Path.ChangeExtension(
+            Path.GetRandomFileName(),
+            Path.GetExtension(file.Name));
+
+            string path = Path.Combine(config.GetValue<string>("FileStorage")!,
+            "tcorey",
+            newFileName);
+
+            string relativPath = Path.Combine("tcorey", newFileName);
+
+            Directory.CreateDirectory(Path.Combine(config.GetValue<string>("FileStorage")!,
+            "tcorey"));
+
+            await using FileStream fs = new(path, FileMode.Create);
+            await file.OpenReadStream(maxFileSize).CopyToAsync(fs);
+
+            return relativPath;
+        }
+        catch (Exception ex)
+        {
+
+            errors.Add($"File: {file.Name} Error: {ex.Message}");
+            throw;
+        }    
+    }
+
+}
